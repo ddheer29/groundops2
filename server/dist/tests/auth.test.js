@@ -8,11 +8,14 @@ const app_1 = require("../src/app");
 const organisation_model_1 = require("../src/models/organisation.model");
 const user_model_1 = require("../src/models/user.model");
 const crypto_util_1 = require("../src/utils/crypto.util");
+const email_service_1 = require("../src/services/email/email.service");
 const app = (0, app_1.createApp)();
-describe('Auth Module Integration Tests', () => {
+describe('Auth Module & Technician Login Integration Tests', () => {
     let organisationId;
     let adminUserId;
+    let adminToken;
     beforeEach(async () => {
+        email_service_1.emailService.clearSentEmails();
         // Seed test organisation
         const org = await organisation_model_1.OrganisationModel.create({
             name: 'Acme Facilities Corp',
@@ -34,46 +37,213 @@ describe('Auth Module Integration Tests', () => {
             emailVerified: true,
         });
         adminUserId = admin._id.toString();
+        // Admin login
+        const loginRes = await (0, supertest_1.default)(app)
+            .post('/api/v1/auth/login')
+            .send({ email: 'sarah@acme.test', password: 'AdminPass123!' });
+        adminToken = loginRes.body.data.accessToken;
     });
-    describe('POST /api/v1/auth/login', () => {
-        it('successfully logs in with valid credentials and returns tokens and entities', async () => {
+    describe('Technician Login Scenarios (Section 8 Verification)', () => {
+        let technicianEmail = 'divyangdheer11@gmail.com';
+        let technicianPassword = 'Dheer@123';
+        beforeEach(async () => {
+            // Create technician through the official invitation workflow
+            await (0, supertest_1.default)(app)
+                .post('/api/v1/invitations')
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({
+                firstName: 'Divyang',
+                lastName: 'Dheer',
+                email: technicianEmail,
+                role: 'TECHNICIAN',
+            });
+            // Obtain token sent via email
+            const sentEmails = email_service_1.emailService.getSentEmails();
+            const token = sentEmails[sentEmails.length - 1].token;
+            // Technician sets password and activates account
+            await (0, supertest_1.default)(app)
+                .post('/api/v1/auth/set-password')
+                .send({
+                token,
+                password: technicianPassword,
+                confirmPassword: technicianPassword,
+            });
+        });
+        // Scenario 1: Valid technician email and password
+        it('Scenario 1: allows activated technician to log in with valid credentials', async () => {
             const res = await (0, supertest_1.default)(app)
                 .post('/api/v1/auth/login')
                 .send({
-                email: 'sarah@acme.test',
-                password: 'AdminPass123!',
+                email: technicianEmail,
+                password: technicianPassword,
             });
             expect(res.status).toBe(200);
             expect(res.body.success).toBe(true);
             expect(res.body.data.accessToken).toBeDefined();
             expect(res.body.data.refreshToken).toBeDefined();
-            expect(res.body.data.user.email).toBe('sarah@acme.test');
-            expect(res.body.data.user.role).toBe('ADMIN');
-            expect(res.body.data.organisation.name).toBe('Acme Facilities Corp');
-            expect(res.body.data.organisation.organisationCode).toBe('ACME-01');
+            expect(res.body.data.user.role).toBe('TECHNICIAN');
+            expect(res.body.data.user.status).toBe('ACTIVE');
         });
-        it('rejects invalid password with 401', async () => {
+        // Scenario 2: Incorrect password
+        it('Scenario 2: rejects incorrect password with 401 UNAUTHENTICATED', async () => {
             const res = await (0, supertest_1.default)(app)
                 .post('/api/v1/auth/login')
                 .send({
-                email: 'sarah@acme.test',
-                password: 'WrongPassword!',
+                email: technicianEmail,
+                password: 'IncorrectPassword999!',
             });
             expect(res.status).toBe(401);
             expect(res.body.success).toBe(false);
+            expect(res.body.message).toBe('Invalid work email or password');
             expect(res.body.error.code).toBe('UNAUTHENTICATED');
         });
-        it('rejects disabled account with 403', async () => {
-            await user_model_1.UserModel.findByIdAndUpdate(adminUserId, { status: 'DISABLED' });
+        // Scenario 3: Email that does not exist
+        it('Scenario 3: rejects non-existent email with same 401 error to avoid user enumeration', async () => {
             const res = await (0, supertest_1.default)(app)
                 .post('/api/v1/auth/login')
                 .send({
-                email: 'sarah@acme.test',
-                password: 'AdminPass123!',
+                email: 'nonexistent.tech@acme.test',
+                password: technicianPassword,
+            });
+            expect(res.status).toBe(401);
+            expect(res.body.success).toBe(false);
+            expect(res.body.message).toBe('Invalid work email or password');
+            expect(res.body.error.code).toBe('UNAUTHENTICATED');
+        });
+        // Scenario 4: Account with INVITED status
+        it('Scenario 4: blocks technician account with INVITED status (not yet activated)', async () => {
+            // Invite a new technician who has NOT set password yet
+            const unactivatedEmail = 'unactivated.tech@acme.test';
+            await (0, supertest_1.default)(app)
+                .post('/api/v1/invitations')
+                .set('Authorization', `Bearer ${adminToken}`)
+                .send({
+                firstName: 'Dave',
+                lastName: 'Bowman',
+                email: unactivatedEmail,
+                role: 'TECHNICIAN',
+            });
+            const res = await (0, supertest_1.default)(app)
+                .post('/api/v1/auth/login')
+                .send({
+                email: unactivatedEmail,
+                password: 'AnyPassword123!',
+            });
+            expect(res.status).toBe(401); // Has no passwordHash yet
+            expect(res.body.success).toBe(false);
+            expect(res.body.error.code).toBe('UNAUTHENTICATED');
+        });
+        // Scenario 5: Account with DISABLED status
+        it('Scenario 5: blocks technician account with DISABLED status', async () => {
+            await user_model_1.UserModel.findOneAndUpdate({ email: technicianEmail }, { status: 'DISABLED' });
+            const res = await (0, supertest_1.default)(app)
+                .post('/api/v1/auth/login')
+                .send({
+                email: technicianEmail,
+                password: technicianPassword,
             });
             expect(res.status).toBe(403);
             expect(res.body.success).toBe(false);
             expect(res.body.error.code).toBe('ACCOUNT_DISABLED');
+        });
+        // Scenario 6: User belonging to an inactive organisation
+        it('Scenario 6: blocks login if user organisation is INACTIVE', async () => {
+            await organisation_model_1.OrganisationModel.findByIdAndUpdate(organisationId, { status: 'INACTIVE' });
+            const res = await (0, supertest_1.default)(app)
+                .post('/api/v1/auth/login')
+                .send({
+                email: technicianEmail,
+                password: technicianPassword,
+            });
+            expect(res.status).toBe(403);
+            expect(res.body.success).toBe(false);
+            expect(res.body.error.code).toBe('ORGANISATION_INACTIVE');
+        });
+        // Scenario 7: Missing email or password
+        it('Scenario 7: rejects missing email or password with 422 VALIDATION_ERROR', async () => {
+            const resNoPass = await (0, supertest_1.default)(app)
+                .post('/api/v1/auth/login')
+                .send({ email: technicianEmail });
+            expect(resNoPass.status).toBe(422);
+            expect(resNoPass.body.error.code).toBe('VALIDATION_ERROR');
+            const resNoEmail = await (0, supertest_1.default)(app)
+                .post('/api/v1/auth/login')
+                .send({ password: technicianPassword });
+            expect(resNoEmail.status).toBe(422);
+            expect(resNoEmail.body.error.code).toBe('VALIDATION_ERROR');
+        });
+        // Scenario 8: Invalid email format
+        it('Scenario 8: rejects invalid email format with 422 VALIDATION_ERROR', async () => {
+            const res = await (0, supertest_1.default)(app)
+                .post('/api/v1/auth/login')
+                .send({
+                email: 'not-an-email-format',
+                password: technicianPassword,
+            });
+            expect(res.status).toBe(422);
+            expect(res.body.error.code).toBe('VALIDATION_ERROR');
+        });
+        // Scenario 9: Successful login returns the complete user profile
+        it('Scenario 9: returns all required user profile fields on successful login', async () => {
+            const res = await (0, supertest_1.default)(app)
+                .post('/api/v1/auth/login')
+                .send({
+                email: technicianEmail,
+                password: technicianPassword,
+            });
+            expect(res.status).toBe(200);
+            const user = res.body.data.user;
+            // Verify all specified fields
+            expect(typeof user.id).toBe('string');
+            expect(user.firstName).toBe('Divyang');
+            expect(user.lastName).toBe('Dheer');
+            expect(user.email).toBe(technicianEmail);
+            expect(user.role).toBe('TECHNICIAN');
+            expect(user.status).toBe('ACTIVE');
+            expect(user.organisationId).toBe(organisationId);
+            expect(user.invitedBy).toBe(adminUserId);
+            expect(user.emailVerified).toBe(true);
+            expect(typeof user.lastLoginAt).toBe('string');
+            expect(typeof user.createdAt).toBe('string');
+            expect(typeof user.updatedAt).toBe('string');
+        });
+        // Scenario 10: Successful login returns the correct organisation details
+        it('Scenario 10: returns all required organisation fields on successful login', async () => {
+            const res = await (0, supertest_1.default)(app)
+                .post('/api/v1/auth/login')
+                .send({
+                email: technicianEmail,
+                password: technicianPassword,
+            });
+            expect(res.status).toBe(200);
+            const org = res.body.data.organisation;
+            expect(org.id).toBe(organisationId);
+            expect(org.name).toBe('Acme Facilities Corp');
+            expect(org.organisationCode).toBe('ACME-01');
+            expect(org.email).toBe('ops@acme.test');
+            expect(org.status).toBe('ACTIVE');
+            expect(typeof org.createdAt).toBe('string');
+            expect(typeof org.updatedAt).toBe('string');
+        });
+        // Scenario 11: Sensitive fields are never included in the response
+        it('Scenario 11: ensures sensitive fields (hashes, security tokens) are never exposed', async () => {
+            const res = await (0, supertest_1.default)(app)
+                .post('/api/v1/auth/login')
+                .send({
+                email: technicianEmail,
+                password: technicianPassword,
+            });
+            expect(res.status).toBe(200);
+            const data = res.body.data;
+            // User object check
+            expect(data.user.passwordHash).toBeUndefined();
+            expect(data.user.password).toBeUndefined();
+            expect(data.user.__v).toBeUndefined();
+            // Organisation object check
+            expect(data.organisation.__v).toBeUndefined();
+            // Top-level payload check
+            expect(data.tokenHash).toBeUndefined();
+            expect(data.replacedByTokenHash).toBeUndefined();
         });
     });
     describe('Token Refresh and Revocation Rotation', () => {

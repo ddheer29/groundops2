@@ -14,9 +14,18 @@ export function errorHandler(
     return _next(err);
   }
 
-  // AppError instance
-  if (err instanceof AppError) {
+  // AppError instance (or duck-typed with statusCode)
+  if (err instanceof AppError || (typeof err?.statusCode === 'number' && err?.code)) {
     return sendError(res, err.statusCode, err.message, err.code, err.details);
+  }
+
+  // Zod validation error fallback
+  if (err?.name === 'ZodError' || Array.isArray(err?.issues)) {
+    const issues = (err.issues || err.errors || []).map((e: any) => ({
+      field: Array.isArray(e.path) ? e.path.join('.') : String(e.path || ''),
+      message: e.message || 'Invalid value',
+    }));
+    return sendError(res, 422, 'Validation failed', 'VALIDATION_ERROR', issues);
   }
 
   // MongoDB duplicate key error

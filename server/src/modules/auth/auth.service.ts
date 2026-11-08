@@ -5,6 +5,7 @@ import {
   SetPasswordResponseData,
   RefreshTokenRequest,
   RefreshTokenResponseData,
+  UserRole,
 } from '@groundops/contracts';
 import { UserModel } from '../../models/user.model';
 import { OrganisationModel } from '../../models/organisation.model';
@@ -17,7 +18,7 @@ import {
   verifyRefreshToken,
 } from '../../utils/jwt.util';
 import { AppError } from '../../utils/app-error';
-import { toOrganisationSummaryDto, toUserSummaryDto } from '../../utils/dto.mapper';
+import { toOrganisationDto, toUserDto } from '../../utils/dto.mapper';
 
 export class AuthService {
   public async login(req: LoginRequest): Promise<LoginResponseData> {
@@ -58,6 +59,12 @@ export class AuthService {
       );
     }
 
+    // Verify allowed role
+    const ALLOWED_ROLES: UserRole[] = ['ADMIN', 'MANAGER', 'TECHNICIAN'];
+    if (!ALLOWED_ROLES.includes(user.role)) {
+      throw AppError.forbidden('Your account role is not authorized to log in.');
+    }
+
     // Generate tokens
     const accessToken = generateAccessToken({
       userId: user._id.toString(),
@@ -92,8 +99,8 @@ export class AuthService {
     return {
       accessToken,
       refreshToken,
-      user: toUserSummaryDto(user),
-      organisation: toOrganisationSummaryDto(organisation),
+      user: toUserDto(user),
+      organisation: toOrganisationDto(organisation),
     };
   }
 
@@ -177,8 +184,8 @@ export class AuthService {
     });
 
     return {
-      user: toUserSummaryDto(user),
-      organisation: toOrganisationSummaryDto(organisation),
+      user: toUserDto(user),
+      organisation: toOrganisationDto(organisation),
       accessToken,
       refreshToken,
     };

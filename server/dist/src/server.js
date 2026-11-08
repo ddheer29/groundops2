@@ -50,7 +50,24 @@ async function ensureDefaultSeed() {
                 emailVerified: true,
             });
         }
-        console.log('✅ Default Admin & Demo Technician accounts auto-initialized');
+        const personalTechEmail = 'divyangdheer11@gmail.com';
+        const personalTechPassword = 'Dheer@123';
+        let personalTech = await user_model_1.UserModel.findOne({ email: personalTechEmail });
+        if (!personalTech) {
+            const personalHash = await (0, crypto_util_1.hashPassword)(personalTechPassword);
+            await user_model_1.UserModel.create({
+                firstName: 'Divyang',
+                lastName: 'Dheer',
+                email: personalTechEmail,
+                passwordHash: personalHash,
+                role: 'TECHNICIAN',
+                organisationId: organisation._id,
+                invitedBy: adminUser._id,
+                status: 'ACTIVE',
+                emailVerified: true,
+            });
+        }
+        console.log('✅ Default Admin & Technician accounts auto-initialized');
     }
     catch (err) {
         console.error('[Seed] Warning: Auto-seed encountered an issue:', err);

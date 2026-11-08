@@ -135,8 +135,8 @@ export const swaggerDocument = {
         properties: {
           accessToken: { type: 'string' },
           refreshToken: { type: 'string' },
-          user: { $ref: '#/components/schemas/UserSummary' },
-          organisation: { $ref: '#/components/schemas/OrganisationSummary' },
+          user: { $ref: '#/components/schemas/User' },
+          organisation: { $ref: '#/components/schemas/Organisation' },
         },
       },
       SetPasswordRequest: {

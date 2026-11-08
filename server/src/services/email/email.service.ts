@@ -23,7 +23,7 @@ class EmailService {
   private sentEmailsHistory: SentEmailRecord[] = [];
 
   constructor() {
-    if (env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASSWORD) {
+    if (env.NODE_ENV !== 'test' && env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASSWORD) {
       this.transporter = nodemailer.createTransport({
         host: env.SMTP_HOST,
         port: env.SMTP_PORT,

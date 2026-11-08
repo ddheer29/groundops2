@@ -34,6 +34,11 @@ class AuthService {
         if (organisation.status !== 'ACTIVE') {
             throw new app_error_1.AppError(403, 'Organisation account is inactive. Please contact GroundOps support.', 'ORGANISATION_INACTIVE');
         }
+        // Verify allowed role
+        const ALLOWED_ROLES = ['ADMIN', 'MANAGER', 'TECHNICIAN'];
+        if (!ALLOWED_ROLES.includes(user.role)) {
+            throw app_error_1.AppError.forbidden('Your account role is not authorized to log in.');
+        }
         // Generate tokens
         const accessToken = (0, jwt_util_1.generateAccessToken)({
             userId: user._id.toString(),
@@ -63,8 +68,8 @@ class AuthService {
         return {
             accessToken,
             refreshToken,
-            user: (0, dto_mapper_1.toUserSummaryDto)(user),
-            organisation: (0, dto_mapper_1.toOrganisationSummaryDto)(organisation),
+            user: (0, dto_mapper_1.toUserDto)(user),
+            organisation: (0, dto_mapper_1.toOrganisationDto)(organisation),
         };
     }
     async setPassword(req) {
@@ -133,8 +138,8 @@ class AuthService {
             isRevoked: false,
         });
         return {
-            user: (0, dto_mapper_1.toUserSummaryDto)(user),
-            organisation: (0, dto_mapper_1.toOrganisationSummaryDto)(organisation),
+            user: (0, dto_mapper_1.toUserDto)(user),
+            organisation: (0, dto_mapper_1.toOrganisationDto)(organisation),
             accessToken,
             refreshToken,
         };
