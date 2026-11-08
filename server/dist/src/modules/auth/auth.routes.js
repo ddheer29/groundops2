@@ -1,0 +1,14 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.authRoutes = void 0;
+const express_1 = require("express");
+const contracts_1 = require("@groundops/contracts");
+const auth_controller_1 = require("./auth.controller");
+const validate_middleware_1 = require("../../middleware/validate.middleware");
+const rate_limit_middleware_1 = require("../../middleware/rate-limit.middleware");
+const router = (0, express_1.Router)();
+router.post('/login', rate_limit_middleware_1.authLimiter, (0, validate_middleware_1.validateBody)(contracts_1.LoginRequestSchema), auth_controller_1.authController.login);
+router.post('/set-password', rate_limit_middleware_1.authLimiter, (0, validate_middleware_1.validateBody)(contracts_1.SetPasswordRequestSchema), auth_controller_1.authController.setPassword);
+router.post('/refresh-token', (0, validate_middleware_1.validateBody)(contracts_1.RefreshTokenRequestSchema), auth_controller_1.authController.refreshToken);
+router.post('/logout', (0, validate_middleware_1.validateBody)(contracts_1.LogoutRequestSchema), auth_controller_1.authController.logout);
+exports.authRoutes = router;
