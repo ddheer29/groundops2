@@ -1,97 +1,181 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# GroundOps – Enterprise Field Operations & Maintenance Platform
 
-# Getting Started
+GroundOps is an internal enterprise field operations and maintenance management platform engineered exclusively for maintenance companies, facility managers, and field technicians.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+---
 
-## Step 1: Start Metro
+## 🏛 System Architecture & Repository Structure
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+GroundOps uses a unified monorepo architecture ensuring **Single Source of Truth** for data contracts across the entire ecosystem:
 
-To start the Metro dev server, run the following command from the root of your React Native project:
-
-```sh
-# Using npm
-npm start
-
-# OR using Yarn
-yarn start
+```text
+groundops/
+├── shared/
+│   └── contracts/                 # Single Source of Truth Zod schemas & TypeScript types
+│       ├── src/
+│       │   ├── enums/             # Shared Enums (UserRole, UserStatus, OrganisationStatus, InvitationStatus)
+│       │   ├── schemas/           # Zod entity & DTO schemas (auth, user, organisation, invitation)
+│       │   ├── types/             # Derived TypeScript types via z.infer
+│       │   ├── api/               # API route definitions and constants (/api/v1)
+│       │   └── index.ts           # Barrel export
+│       └── package.json           # @groundops/contracts
+│
+├── server/                        # Node.js + Express + TypeScript Backend
+│   ├── src/
+│   │   ├── config/                # Environment (Zod validated) & MongoDB connection (with in-memory fallback)
+│   │   ├── middleware/            # JWT authentication, role RBAC, Zod validator, rate limiting, error handler
+│   │   ├── models/                # Mongoose models (Organisation, User, Invitation, RefreshToken)
+│   │   ├── modules/
+│   │   │   ├── auth/              # Login, token refresh, password setup, logout
+│   │   │   ├── users/             # /me profile, technicians roster
+│   │   │   ├── organisations/     # Organisation details, operational stats & headcounts
+│   │   │   └── invitations/       # Cryptographic token invitation generation, verification, resend, revoke
+│   │   ├── services/email/        # Nodemailer integration (HTML email templates + in-memory test tracking)
+│   │   ├── swagger/               # OpenAPI 3.0 specification & Swagger UI (/api/docs)
+│   │   ├── utils/                 # Crypto hashing (bcrypt, sha256), JWT utilities, DTO mappers
+│   │   ├── app.ts                 # Express application factory
+│   │   └── server.ts              # Server bootstrap and graceful shutdown
+│   ├── scripts/
+│   │   └── seed-admin.ts          # Idempotent seed script creating default Organisation, Admin & Demo Technician
+│   ├── tests/                     # Jest integration tests (Auth & Invitations suite)
+│   └── package.json
+│
+├── admin-web/                     # Admin Web Portal (React + Vite + TypeScript)
+│   ├── src/
+│   │   ├── context/               # AuthContext (JWT persistence, admin profile state)
+│   │   ├── services/api.ts        # Axios client with automatic Bearer token injection and refresh interceptor
+│   │   ├── pages/
+│   │   │   ├── LoginPage.tsx      # Admin login form with Zod validation
+│   │   │   ├── DashboardPage.tsx  # Metrics cards, headcounts & recent invites summary
+│   │   │   ├── TechniciansPage.tsx# Technician accounts roster & invitation management (Resend, Revoke)
+│   │   │   ├── InviteTechnicianPage.tsx # Form to dispatch secure 72-hour invitation email
+│   │   │   └── AcceptInvitationPage.tsx # Public onboarding page for technicians to verify link & set password
+│   │   └── routes/                # Protected Layout & App Routes
+│   └── package.json
+│
+├── src/                           # Mobile Application (React Native + TypeScript UI)
+│   ├── navigation/                # Bottom tabs (Home, Jobs, Assets, Schedule, Profile) + AuthStack
+│   └── screens/                   # Field technician screens & workflows
+└── package.json
 ```
 
-## Step 2: Build and run your app
+---
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+## 🔒 Security & Data Contract Invariants
 
-### Android
+1. **Multi-Tenancy**: Every user belongs to an `organisation`. Data queries are strictly scoped by `organisationId`.
+2. **String Identifiers**: All entity identifiers exposed over the API are strings (`id: string`), decoupling API consumers from MongoDB's internal `ObjectId`.
+3. **ISO 8601 Timestamps**: All date-time values returned by the API are formatted as ISO 8601 UTC strings (`2026-11-08T00:00:00.000Z`).
+4. **No Sensitive Leaks**: Sensitive fields (`passwordHash`, raw `tokenHash`) are never exposed in public API responses.
+5. **Invitation Token Security**: Raw invitation tokens (32 bytes cryptographically secure random bytes) are hashed with SHA-256 before storing in MongoDB (`tokenHash`). Only the SHA-256 hash is stored in the database.
+6. **JWT Token Rotation**: Refresh tokens are cryptographically rotated on every use with automatic reuse detection that invalidates sessions if a compromised token is reused.
+7. **Rate Limiting**: `express-rate-limit` protects authentication endpoints (login, password setup) and invitation dispatch endpoints against abuse.
 
-```sh
-# Using npm
-npm run android
+---
 
-# OR using Yarn
-yarn android
+## 🚀 Quick Start Guide
+
+### Prerequisites
+- Node.js `v18+` (Tested on `v24.21.0`)
+- npm `v9+`
+- (Optional) Local MongoDB running at `mongodb://127.0.0.1:27017` (If MongoDB is not running, the server automatically starts an embedded in-memory MongoDB instance).
+
+---
+
+### Step 1: Shared Contracts Setup
+
+The shared contracts package must be compiled before starting services:
+
+```bash
+# Build the contracts package
+npx tsc -p shared/contracts
 ```
 
-### iOS
+---
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
+### Step 2: Backend Server Setup
 
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+```bash
+cd server
 
-```sh
-bundle install
+# Verify environment variables (defaults work out of the box with in-memory DB)
+cp .env.example .env
+
+# Run database seed to create initial organisation, admin, and demo technician:
+npm run seed:admin
+
+# Start backend development server:
+npm run dev
 ```
 
-Then, and every time you update your native dependencies, run:
+The backend server will start on `http://localhost:5001`.
+- **API Base**: `http://localhost:5001/api/v1`
+- **Swagger Documentation**: `http://localhost:5001/api/docs`
+- **Health Check**: `http://localhost:5001/api/health`
 
-```sh
-bundle exec pod install
+#### Pre-seeded Credentials
+- **System Administrator**:
+  - Email: `admin@groundops.demo`
+  - Password: `Admin@123456`
+- **Demo Field Technician**:
+  - Email: `alex@groundops.demo`
+  - Password: `Demo@1234`
+
+---
+
+### Step 3: Admin Web Portal Setup
+
+In a new terminal window:
+
+```bash
+cd admin-web
+
+# Start Vite development server
+npm run dev
 ```
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+The Admin Web Portal will be available at:
+`http://localhost:3000` (or `http://localhost:5173`)
 
-```sh
-# Using npm
-npm run ios
+Features available in Admin Portal:
+1. **Admin Login**: Sign in with `admin@groundops.demo` / `Admin@123456`.
+2. **Dashboard Overview**: View total headcount, active technicians, and pending invitations.
+3. **Invite Technician**: Dispatch a single-use 72-hour onboarding link via email.
+4. **Workforce Management**: Inspect invitations, resend expired/unclaimed invites, or revoke access.
+5. **Accept Invitation Flow**: Direct simulated technician onboarding link `/accept-invitation?token=<token>` allowing password creation and instant account activation.
 
-# OR using Yarn
-yarn ios
+---
+
+### Step 4: Running Integration Tests
+
+Run the full automated test suite (Auth rotation, RBAC, Nodemailer invitation dispatch, token verification, password activation, tenant isolation):
+
+```bash
+cd server
+npm test
 ```
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+---
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+## 📡 API Endpoints Reference
 
-## Step 3: Modify your app
+All routes are prefixed with `/api/v1`:
 
-Now that you have successfully run the app, let's make changes!
+| Method | Endpoint | Access | Description |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/auth/login` | Public | Authenticate user with work email and password |
+| `POST` | `/api/v1/auth/set-password` | Public | Set technician password and activate account via invitation token |
+| `POST` | `/api/v1/auth/refresh-token` | Public | Rotate refresh token and obtain new access token |
+| `POST` | `/api/v1/auth/logout` | Public / Token | Invalidate active refresh token |
+| `GET` | `/api/v1/users/me` | Bearer Token | Get authenticated user profile and organisation summary |
+| `GET` | `/api/v1/users/technicians` | Admin / Manager | List all technicians in user's organisation |
+| `GET` | `/api/v1/organisations/my` | Bearer Token | Retrieve organisation profile |
+| `GET` | `/api/v1/organisations/stats` | Admin / Manager | Retrieve dashboard metrics (headcount, pending invites) |
+| `GET` | `/api/v1/invitations` | Admin / Manager | List all invitations in user's organisation |
+| `POST` | `/api/v1/invitations` | Admin | Dispatch new technician invitation email |
+| `GET` | `/api/v1/invitations/verify/:token` | Public | Verify validity of an invitation link before password setup |
+| `POST` | `/api/v1/invitations/:id/resend` | Admin | Invalidate previous link and send fresh 72-hour invitation |
+| `POST` | `/api/v1/invitations/:id/revoke` | Admin | Revoke a pending technician invitation |
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
-
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
-
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+Interactive Swagger documentation with complete schemas and try-it-out capabilities is accessible at:
+👉 **[http://localhost:5001/api/docs](http://localhost:5001/api/docs)**
